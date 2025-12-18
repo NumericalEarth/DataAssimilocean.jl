@@ -2,3 +2,14 @@ name = "DataAssimilocean"
 uuid = "e4749dc9-c8b7-442d-ad3e-5d7625e3069c"
 version = "0.1.0"
 authors = ["Gregory Wagner <gregory.leclaire.wagner@gmail.com>"]
+
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+ClimaOcean = "0376089a-ecfe-4b0e-a64f-9c555d74d754"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[compat]
+ClimaOcean = "0.8.10"
+Oceananigans = "0.102.5"
