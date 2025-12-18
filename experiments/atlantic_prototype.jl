@@ -33,7 +33,7 @@ using Oceananigans.Units
 using ClimaOcean
 using ClimaOcean.EN4: EN4Monthly
 using Printf
-using Dates
+using Dates: DateTime
 
 # ## Configuration
 #
