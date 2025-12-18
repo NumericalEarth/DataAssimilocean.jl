@@ -209,6 +209,57 @@ run!(simulation)
 - Check type stability for GPU-bound code
 - If a test fails after a change, revisit whether the change was correct
 
+### Debugging terminal output from Julia
+
+Julia error messages can be overwhelmed by extremely long type signatures, making errors unreadable. Use these techniques:
+
+1. **Filter for actual errors:**
+   ```bash
+   julia script.jl 2>&1 | grep -E "^ERROR|error:|Exception"
+   ```
+
+2. **Use `--color=no` to reduce ANSI clutter:**
+   ```bash
+   julia --color=no script.jl 2>&1 | tail -50
+   ```
+
+3. **Wrap simulation runs in try/catch for cleaner errors:**
+```julia
+   try
+       run!(simulation)
+   catch e
+       @error "Simulation failed" exception=(e, catch_backtrace())
+       rethrow()
+   end
+   ```
+
+4. **For ClimaOcean simulations, common runtime errors include:**
+   - `NaN` or `Inf` values from numerical instability (reduce time step)
+   - Missing JRA55 data files (check download completed)
+   - ECCO credential issues (use EN4 instead, no credentials needed)
+   - Memory issues with large grids on CPU
+
+5. **Check specific error types:**
+   ```bash
+   julia script.jl 2>&1 | grep -E "MethodError|InexactError|DomainError|TypeError"
+   ```
+
+6. **Truncate long type signatures in error output:**
+   Julia error messages often contain massive type signatures. Use this pattern to get readable errors:
+   ```julia
+   try
+       run!(simulation)
+   catch e
+       println("=== ERROR TYPE ===")
+       println(typeof(e))
+       println("=== ERROR MESSAGE ===")
+       msg = sprint(showerror, e)
+       for line in split(msg, "\n")[1:min(5, end)]
+           println(length(line) > 200 ? line[1:200] * "..." : line)
+       end
+   end
+   ```
+
 ## Common Pitfalls
 
 1. **Type Instability**: Especially in kernel functions - ruins GPU performance
@@ -216,6 +267,7 @@ run!(simulation)
 3. **Forgetting Explicit Imports**: In source code, explicitly import all used functions
 4. **Using `interior()` for plotting**: Use `Field` objects directly with Makie; use `view(field, :, :, k)` for slices
 5. **ECCO credentials**: ECCO data requires `ECCO_USERNAME` and `ECCO_WEBDAV_PASSWORD` environment variables. Use EN4 instead if you don't have credentials (see https://github.com/CliMA/ClimaOcean.jl/blob/main/src/DataWrangling/ECCO/README.md)
+6. **TimeStepWizard with OceanSeaIceModel**: `TimeStepWizard` doesn't work with `OceanSeaIceModel` (missing `cell_advection_timescale` method). Use a fixed time step for coupled models.
 
 ## References
 

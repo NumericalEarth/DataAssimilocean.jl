@@ -174,7 +174,7 @@ coupled_model = OceanSeaIceModel(ocean; atmosphere, radiation)
 # For the coarse 1/4° grid, we can use a relatively large time step.
 # We start conservatively and let the TimeStepWizard adjust.
 
-Δt = 30minutes  # Initial time step (conservative for spin-up)
+Δt = 5minutes  # Initial time step (conservative for spin-up with CATKE)
 
 # For testing, we run a short simulation. For production, increase stop_time.
 stop_time = 1days  # Short for testing; increase for science runs
@@ -183,10 +183,13 @@ simulation = Simulation(coupled_model; Δt, stop_time)
 
 # ### Time step wizard
 #
-# Automatically adjust time step based on CFL condition.
+# Note: TimeStepWizard currently doesn't work with OceanSeaIceModel (missing
+# cell_advection_timescale method). For coupled models, use a fixed time step.
+# For the 1/4° grid, Δt = 10-30 minutes is typically stable.
 
-wizard = TimeStepWizard(; cfl = 0.2, max_Δt = 1hour, max_change = 1.1)
-simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
+# If using ocean only (no coupling), you can use:
+# wizard = TimeStepWizard(; cfl = 0.2, max_Δt = 1hour, max_change = 1.1)
+# simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
 
 # ### Progress callback
 #
