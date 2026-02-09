@@ -268,6 +268,48 @@ Julia error messages can be overwhelmed by extremely long type signatures, makin
 4. **Using `interior()` for plotting**: Use `Field` objects directly with Makie; use `view(field, :, :, k)` for slices
 5. **ECCO credentials**: ECCO data requires `ECCO_USERNAME` and `ECCO_WEBDAV_PASSWORD` environment variables. Use EN4 instead if you don't have credentials (see https://github.com/CliMA/ClimaOcean.jl/blob/main/src/DataWrangling/ECCO/README.md)
 6. **TimeStepWizard with OceanSeaIceModel**: `TimeStepWizard` doesn't work with `OceanSeaIceModel` (missing `cell_advection_timescale` method). Use a fixed time step for coupled models.
+7. **Re-running simulations after visualization errors**: If a long simulation completes successfully but the post-processing visualization/animation code fails, **do not re-run the entire simulation**. Instead, fix the visualization code and run only that part. Structure scripts to allow re-running visualization separately, e.g., by putting visualization in a separate file or making it conditional on `isfile(output_file)`.
+8. **Caching expensive computations**: `regrid_bathymetry` is expensive (several minutes for high-resolution grids). Save the resulting `bottom_height` field to JLD2 and reload it on subsequent runs:
+   ```julia
+   bathymetry_file = joinpath(output_dir, "bathymetry_$(Nx)x$(Ny).jld2")
+   if isfile(bathymetry_file)
+       bottom_height = jldopen(bathymetry_file)["bottom_height"]
+   else
+       bottom_height = regrid_bathymetry(grid; ...)
+       jldsave(bathymetry_file; bottom_height=interior(bottom_height))
+   end
+   ```
+
+9. **JRA55 atmospheric data uses ABSOLUTE time**: This is a recurring bug in animations! JRA55 `FieldTimeSeries` uses seconds since January 1, 1958 (the JRA55 epoch), NOT relative simulation time. When querying atmospheric fields for visualization/animation:
+   ```julia
+   # WRONG - will show static atmosphere:
+   atm_u = atmosphere.velocities.u[Time(t)]  # t is simulation time in seconds
+   
+   # CORRECT - convert to absolute JRA55 time:
+   jra55_epoch = DateTime(1958, 1, 1)
+   time_offset = (simulation_start_date - jra55_epoch).value / 1000  # milliseconds to seconds
+   query_time = time_offset + t  # t is simulation time in seconds
+   atm_u = atmosphere.velocities.u[Time(query_time)]
+   ```
+   
+   **Alternative approach**: Save atmosphere state during simulation via the coupled model's exchanger, but verify the saved fields actually evolve by checking min/max values across time steps before creating animations.
+
+10. **Two-stage simulations MUST use Stage 1 state**: When running a coarse-resolution spinup followed by high-resolution analysis, the high-resolution stage MUST be initialized from the spun-up state, not from climatology (EN4/ECCO). Otherwise, the spinup is wasted and the ocean will lack mesoscale features (eddies, fronts, etc.):
+    ```julia
+    # WRONG - defeats the purpose of spinup:
+    set!(ocean.model,
+         T = Metadatum(:temperature; date=start_date, dataset=EN4Monthly()),
+         S = Metadatum(:salinity;    date=start_date, dataset=EN4Monthly()))
+    
+    # CORRECT - interpolate spun-up state to high-res grid:
+    source_state = load_model_state("stage1_output/final_state.jld2")
+    interpolate_state!(ocean, source_state, source_resolution, target_resolution)
+    ```
+    
+    When interpolating between grids with different bathymetry:
+    - Interpolate tracers (T, S, e) - these carry the mesoscale structure
+    - Initialize velocities to zero - they spin up quickly from density gradients
+    - This avoids NaN instabilities from velocity/bathymetry mismatches
 
 ## References
 

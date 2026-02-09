@@ -28,3 +28,8 @@ LocalPreferences.toml
 JuliaLocalPreferences.toml
 
 *.jld2
+*.png
+*.mp4
+*.log
+*.swp
+*.json
