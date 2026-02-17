@@ -33,3 +33,7 @@ JuliaLocalPreferences.toml
 *.log
 *.swp
 *.json
+
+# SLURM output logs
+slurm/logs/*.out
+slurm/logs/*.err

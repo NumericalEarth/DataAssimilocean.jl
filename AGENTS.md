@@ -13,6 +13,14 @@ The primary use case is regional ocean state estimation and forward simulation, 
 - **Key Packages**: Oceananigans.jl, ClimaOcean.jl, Enzyme.jl (for AD-based data assimilation)
 - **Data Sources**: ECCO (state estimates), JRA-55 (atmospheric reanalysis)
 
+### Perlmutter (NERSC)
+
+- **SLURM account**: `m5176_g` (GPU), `m5176` (CPU)
+- **Scratch directory**: `$SCRATCH` (`/pscratch/sd/g/glwagner`)
+- **Julia**: via juliaup (`~/.juliaup/bin/julia`)
+- **SLURM scripts**: `slurm/` directory
+- Use `srun` to launch Julia inside SLURM allocations for proper GPU/CPU binding
+
 ## Code Style & Conventions
 
 ### Julia Best Practices

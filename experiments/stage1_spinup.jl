@@ -1,28 +1,64 @@
-# Stage 1: Coarse resolution spinup (1/4°)
+# Stage 1: Coarse resolution spinup
 # Runs for specified duration and saves final state for Stage 2
 #
 # Usage:
-#   julia --project experiments/stage1_spinup.jl [--test]
+#   julia --project experiments/stage1_spinup.jl [options]
 #
-# The --test flag runs a 1-day test instead of full 60-day spinup
+# Examples:
+#   julia --project experiments/stage1_spinup.jl --test
+#   julia --project experiments/stage1_spinup.jl --resolution 0.25 --days 360
+#   julia --project experiments/stage1_spinup.jl --resolution 0.125 --days 720 --dt 5 --no-animation
 
 include("irma_utils.jl")
 
-using CairoMakie
+using ArgParse
 
-# Parse command line args
-test_mode = "--test" in ARGS
+function parse_commandline()
+    s = ArgParseSettings(description = "Stage 1: Coarse resolution ocean spinup simulation")
+
+    @add_arg_table! s begin
+        "--test"
+            help = "Run a 1-day test instead of full spinup"
+            action = :store_true
+        "--resolution"
+            help = "Grid resolution in degrees (e.g. 0.25 for 1/4°, 0.125 for 1/8°)"
+            arg_type = Float64
+            default = 0.125
+        "--days"
+            help = "Number of spinup days (ignored if --test is set)"
+            arg_type = Int
+            default = 720
+        "--dt"
+            help = "Time step in minutes"
+            arg_type = Float64
+            default = 5.0
+        "--output-dir"
+            help = "Output directory (default: auto-generated from resolution)"
+            arg_type = String
+            default = ""
+        "--no-animation"
+            help = "Skip the post-simulation animation"
+            action = :store_true
+        "--cpu"
+            help = "Run on CPU instead of GPU"
+            action = :store_true
+    end
+
+    return parse_args(s)
+end
+
+args = parse_commandline()
 
 # Configuration
-arch = GPU()
-resolution = 1/8  # degrees
+arch = args["cpu"] ? CPU() : GPU()
+resolution = args["resolution"]
 
 # Simulation timing
-if test_mode
+if args["test"]
     spinup_days = 1
     @info "TEST MODE: Running 1-day spinup"
 else
-    spinup_days = 360 * 2
+    spinup_days = args["days"]
     @info "PRODUCTION: Running $(spinup_days)-day spinup"
 end
 
@@ -37,7 +73,7 @@ end_date = hurricane_start
 
 # Output directory (includes resolution for traceability)
 resolution_tag = @sprintf("%.4gdeg", resolution)  # e.g. "0.5deg" or "0.25deg"
-output_dir = "stage1_output_$(resolution_tag)"
+output_dir = isempty(args["output-dir"]) ? "stage1_output_$(resolution_tag)" : args["output-dir"]
 mkpath(output_dir)
 
 # === Grid Setup ===
@@ -67,7 +103,7 @@ atmosphere, radiation = create_atmosphere(arch, start_date, end_date)
 coupled_model = OceanSeaIceModel(ocean; atmosphere, radiation)
 
 # === Simulation ===
-Δt = 5minutes
+Δt = args["dt"] * minutes
 stop_time = spinup_days * days
 simulation = Simulation(coupled_model; Δt, stop_time)
 
@@ -91,6 +127,15 @@ save_model_state(ocean, state_file)
 
 # ## Animation of spinup
 
+if args["no-animation"]
+    @info "Skipping animation (--no-animation flag set)"
+    @info "Stage 1 complete!"
+    @info "Final state saved to: $state_file"
+    @info "Ready for Stage 2 initialization"
+    exit(0)
+end
+
+using CairoMakie
 using Oceananigans.OutputReaders: FieldTimeSeries
 
 surface_file = joinpath(output_dir, "surface_fields.jld2")

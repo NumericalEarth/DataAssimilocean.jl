@@ -4,10 +4,12 @@ version = "0.1.0"
 authors = ["Gregory Wagner <gregory.leclaire.wagner@gmail.com>"]
 
 [deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 ClimaOcean = "0376089a-ecfe-4b0e-a64f-9c555d74d754"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
