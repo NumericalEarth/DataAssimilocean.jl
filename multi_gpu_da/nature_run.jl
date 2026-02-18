@@ -84,6 +84,14 @@ simulation = Simulation(coupled_model; Δt, stop_time=run_days * days)
 # Output writers
 setup_output_writers!(ocean, coupled_model, output_dir;
                        surface_interval=6hour, flux_interval=6hour)
+
+# Daily 3D tracer output for DA observations (upper ocean + full column)
+ocean.output_writers[:tracers_3d] = JLD2Writer(ocean.model,
+    (; T=ocean.model.tracers.T, S=ocean.model.tracers.S);
+    schedule = TimeInterval(1days),
+    filename = joinpath(output_dir, "tracers_3d"),
+    overwrite_existing = true)
+
 add_progress_callback!(simulation, start_date; interval=100)
 
 # ============================================================================

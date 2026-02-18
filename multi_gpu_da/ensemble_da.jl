@@ -1,11 +1,18 @@
 # Ensemble Transform Kalman Filter (ETKF) for ocean state estimation (Multi-GPU)
 #
-# MPI-aware ETKF with observation thinning:
+# MPI-aware ETKF with Argo-like observation network:
 #   1. Initialize ensemble from perturbed spinup state (per-rank)
 #   2. Forecast: run each member forward 1 day (4 GPUs via MPI, members sequential)
-#   3. Analyze: gather thinned surface obs, compute ETKF weights
+#   3. Analyze: extract 3D observations at random profile locations (upper 1000m),
+#      gather via MPI, compute ETKF weights
 #   4. Update: apply weights to local 3D T and S fields
-#   5. Repeat for 14 analysis cycles
+#   5. Repeat for N analysis cycles
+#
+# Observation network mimics Argo floats:
+#   - ~770 floats in domain (~1 per 3-degree box)
+#   - Each profiles every ~10 days → ~76 profiles per daily cycle
+#   - Each profile observes all grid levels in the upper 1000m (~31 levels)
+#   - Total: ~4,700 obs (T+S) per cycle
 #
 # Usage:
 #   srun -n 4 julia --project multi_gpu_da/ensemble_da.jl \
@@ -18,6 +25,7 @@ include(joinpath(@__DIR__, "..", "experiments", "irma_utils.jl"))
 
 using Oceananigans.DistributedComputations
 using Oceananigans.DistributedComputations: construct_global_array
+using Oceananigans.Grids: znodes
 using Random
 using Statistics
 using LinearAlgebra
@@ -50,15 +58,20 @@ arch = Distributed(GPU(); partition=Partition(2, 2))
 N_ens = 10
 N_cycles = isnothing(cli_cycles) ? 14 : cli_cycles
 analysis_window = 1days
-inflation = 1.5             # Stronger inflation (was 1.05 in single-GPU)
+inflation = 1.5
 
 # Observation errors
-sigma_T = 0.1
-sigma_S = 0.01
+sigma_T = 0.1    # C
+sigma_S = 0.01   # psu
 
-# Observation thinning: take every thin_factor-th point in each direction
-# At 1/8 deg: local 400×280, thinned by 4 → 100×70 = 7K per rank, 28K global per field
-thin_factor = 4
+# Argo-like observation network
+# Domain: 100W-0E (100 deg) x 10S-60N (70 deg)
+# Argo density: ~1 float per 3-degree box → ~33*23 = 759 floats
+# Each profiles every ~10 days → ~76 profiles per daily DA cycle
+# Each profile: all grid levels in upper 1000m (~31 levels)
+n_profiles_per_cycle = 76
+obs_depth_limit = -1000.0   # meters: observe upper 1000m only
+obs_seed = 12345            # base seed for reproducible profile locations
 
 # Perturbation parameters
 T_noise_std = 0.5
@@ -71,12 +84,13 @@ noise_depth_levels = 20
 start_date = DateTime(2017, 8, 25)
 end_date = start_date + Day(N_cycles)
 
-rank == 0 && @info "ETKF Configuration (Multi-GPU):"
+rank == 0 && @info "ETKF Configuration (Multi-GPU, Argo-like obs):"
 rank == 0 && @info "  Ensemble size: $N_ens"
 rank == 0 && @info "  Analysis cycles: $N_cycles"
 rank == 0 && @info "  Inflation: $inflation"
 rank == 0 && @info "  Obs error: T=$(sigma_T) C, S=$(sigma_S) psu"
-rank == 0 && @info "  Obs thinning factor: $thin_factor"
+rank == 0 && @info "  Profiles per cycle: $n_profiles_per_cycle"
+rank == 0 && @info "  Obs depth limit: $(obs_depth_limit) m"
 rank == 0 && @info "  MPI ranks: $nranks"
 
 # ============================================================================
@@ -131,13 +145,30 @@ function apply_etkf_update!(ensemble_field, W, inflation)
 end
 
 """
-    thin_surface(field_2d, thin_factor)
+    extract_profile_observations!(obs_vector, field_3d, i_global, j_global, k_obs,
+                                   Nx_local, Ny_local, i_offset, j_offset)
 
-Take every thin_factor-th point from a 2D array.
-Returns a smaller array.
+Extract observations at Argo-like profile locations from a 3D field.
+Only fills entries for profiles local to this MPI rank (others remain zero).
+Use MPI.Allreduce(SUM) after calling this to combine across ranks.
+
+Layout: obs_vector[(p-1)*n_levels + l] = field_3d[i_local, j_local, k_obs[l]]
 """
-function thin_surface(field_2d, thin_factor)
-    return field_2d[1:thin_factor:end, 1:thin_factor:end]
+function extract_profile_observations!(obs_vector, field_3d, i_global, j_global, k_obs,
+                                        Nx_local, Ny_local, i_offset, j_offset)
+    n_profiles = length(i_global)
+    n_levels = length(k_obs)
+    fill!(obs_vector, 0.0)
+
+    for p in 1:n_profiles
+        il = i_global[p] - i_offset
+        jl = j_global[p] - j_offset
+        if 1 <= il <= Nx_local && 1 <= jl <= Ny_local
+            for (li, k) in enumerate(k_obs)
+                obs_vector[(p-1)*n_levels + li] = field_3d[il, jl, k]
+            end
+        end
+    end
 end
 
 # ============================================================================
@@ -147,6 +178,21 @@ end
 rank == 0 && @info "Creating distributed grid..."
 grid = create_grid(arch, resolution)
 Nx, Ny, Nz = size(grid)  # LOCAL size
+
+# Compute vertical observation levels (upper 1000m) on the regular grid
+# z is the same on all ranks since only x,y are partitioned
+# For ExponentialDiscretization(50, -5000, 0; scale=1250):
+#   k=1 is deepest (~-4950m), k=Nz=50 is surface (~-4m)
+z_faces = znodes(grid, Face())
+k_obs = Int[]
+for k in 1:Nz
+    z_center = 0.5 * (z_faces[k] + z_faces[k+1])
+    if z_center >= obs_depth_limit
+        push!(k_obs, k)
+    end
+end
+n_obs_levels = length(k_obs)
+rank == 0 && @info "  Observation levels: $n_obs_levels (k=$(k_obs[1]):$(k_obs[end]), depth $(obs_depth_limit)m to surface)"
 
 # Rank-aware bathymetry (cached from spinup)
 bathy_file = joinpath(spinup_dir, "bathymetry_$(Nx)x$(Ny)_rank$(rank).jld2")
@@ -164,10 +210,18 @@ grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bottom_height); active_cells_
 
 rank == 0 && @info "  Local grid: ($Nx, $Ny, $Nz)"
 
-# Compute thinned dimensions
-Nx_thin = length(1:thin_factor:Nx)
-Ny_thin = length(1:thin_factor:Ny)
-rank == 0 && @info "  Thinned local surface: ($Nx_thin, $Ny_thin)"
+# Global grid dimensions and MPI rank offsets
+# Partition(2,2): Rx=2, Ry=2
+Nx_global = 2 * Nx
+Ny_global = 2 * Ny
+Ry = 2  # from Partition(2, 2)
+i_rank = div(rank, Ry) + 1   # 1-indexed
+j_rank = mod(rank, Ry) + 1   # 1-indexed
+i_offset = (i_rank - 1) * Nx
+j_offset = (j_rank - 1) * Ny
+
+rank == 0 && @info "  Global grid: ($Nx_global, $Ny_global, $Nz)"
+rank == 0 && @info "  Rank $rank: i_offset=$i_offset, j_offset=$j_offset"
 
 # Load spinup state (per-rank)
 rank == 0 && @info "Loading spinup state..."
@@ -176,31 +230,19 @@ spinup_state = jldopen(state_file) do f
     (T=f["T"], S=f["S"], e=f["e"], u=f["u"], v=f["v"], w=f["w"], η=f["η"])
 end
 
-# Load nature run final surface for truth observations
-# (Global surface saved by nature_run.jl)
-rank == 0 && @info "Loading nature run observations..."
+# Load nature run 3D tracer snapshots (daily, for ETKF observations)
+rank == 0 && @info "Loading nature run 3D tracers..."
+nature_3d_file = joinpath(nature_dir, "tracers_3d_rank$(rank).jld2")
+nature_3d_fh = jldopen(nature_3d_file)
+nature_3d_tkeys = sort(parse.(Int, keys(nature_3d_fh["timeseries/t"])))
+nature_3d_times = [nature_3d_fh["timeseries/t/$(k)"] for k in nature_3d_tkeys]
+rank == 0 && @info "  Nature 3D snapshots: $(length(nature_3d_times)) times"
 
-# For observations, we load the per-rank nature run surface fields at each cycle.
-# Since nature_run.jl saves per-rank surface_fields, we load rank-specific files.
-# But we also saved final_surface_global.jld2 - for simplicity, use the
-# per-rank JLD2Writer output which has time series.
+# Also load surface FieldTimeSeries for diagnostics (RMSE of SST/SSS)
 nature_surface_file = joinpath(nature_dir, "surface_fields_rank$(rank).jld2")
 nature_Tt = FieldTimeSeries(nature_surface_file, "T")
 nature_St = FieldTimeSeries(nature_surface_file, "S")
-nature_times = nature_Tt.times
-
-rank == 0 && @info "  Nature run times: $(length(nature_times)) snapshots"
-
-# Load free run RMSE for comparison
-free_rmse_T = nothing
-free_rmse_days = nothing
-free_rmse_file = joinpath(dirname(free_dir), "plots", "rmse_data.jld2")
-if rank == 0 && isfile(free_rmse_file)
-    @info "Loading free run RMSE data..."
-    free_data = jldopen(free_rmse_file)
-    free_rmse_T = free_data["rmse_T_final"]
-    close(free_data)
-end
+nature_surface_times = nature_Tt.times
 
 # ============================================================================
 #                           INITIALIZE ENSEMBLE
@@ -216,16 +258,15 @@ ensemble_w = Vector{Array{Float64, 3}}(undef, N_ens)
 ensemble_η = Vector{Any}(undef, N_ens)
 
 Nz_local = size(spinup_state.T, 3)
-k_start = max(1, Nz_local - noise_depth_levels + 1)
+k_pert_start = max(1, Nz_local - noise_depth_levels + 1)
 
 for i in 1:N_ens
-    # Seed depends on member AND rank for unique perturbation per rank
     rng = MersenneTwister(42 + i + rank * 1000)
 
     T_i = copy(spinup_state.T)
     S_i = copy(spinup_state.S)
 
-    for k in k_start:Nz_local
+    for k in k_pert_start:Nz_local
         T_i[:, :, k] .+= T_noise_std .* randn(rng, Nx, Ny) .+ T_bias
         S_i[:, :, k] .+= S_noise_std .* randn(rng, Nx, Ny) .+ S_bias
     end
@@ -276,7 +317,22 @@ rank == 0 && @info "Warm-up complete. Starting DA loop."
 #                           DA LOOP
 # ============================================================================
 
-# Diagnostics storage (all ranks compute, rank 0 saves)
+# Observation counts
+n_obs_per_field = n_profiles_per_cycle * n_obs_levels
+n_obs_total = 2 * n_obs_per_field  # T + S
+
+rank == 0 && @info "Observation network:"
+rank == 0 && @info "  Profiles/cycle: $n_profiles_per_cycle"
+rank == 0 && @info "  Levels/profile: $n_obs_levels"
+rank == 0 && @info "  Obs per field: $n_obs_per_field"
+rank == 0 && @info "  Total obs (T+S): $n_obs_total"
+rank == 0 && @info "  Obs-to-ensemble ratio: $(n_obs_total / N_ens)"
+
+# R inverse (observation error covariance inverse, diagonal)
+R_inv = vcat(fill(1.0 / sigma_T^2, n_obs_per_field),
+             fill(1.0 / sigma_S^2, n_obs_per_field))
+
+# Diagnostics storage
 rmse_T_before = Float64[]
 rmse_T_after = Float64[]
 rmse_S_before = Float64[]
@@ -284,21 +340,12 @@ rmse_S_after = Float64[]
 spread_T = Float64[]
 spread_S = Float64[]
 analysis_days = Float64[]
+n_valid_obs_log = Int[]
 
-# Thinned observation error inverse
-# Total thinned obs = nranks * Nx_thin * Ny_thin per field
-n_T_obs_local = Nx_thin * Ny_thin
-n_S_obs_local = Nx_thin * Ny_thin
-n_obs_local = n_T_obs_local + n_S_obs_local
-n_T_obs_global = nranks * n_T_obs_local
-n_S_obs_global = nranks * n_S_obs_local
-n_obs_global = n_T_obs_global + n_S_obs_global
-
-R_inv_global = vcat(fill(1.0 / sigma_T^2, n_T_obs_global),
-                     fill(1.0 / sigma_S^2, n_S_obs_global))
-
-rank == 0 && @info "Thinned obs per field: $n_T_obs_global ($(n_T_obs_local) per rank)"
-rank == 0 && @info "Total obs (T+S): $n_obs_global"
+# Pre-allocate observation vectors
+obs_T_local = zeros(n_obs_per_field)
+obs_S_local = zeros(n_obs_per_field)
+Y_b_local = zeros(n_obs_total, N_ens)
 
 wall_start = time()
 
@@ -317,7 +364,6 @@ for cycle in 1:N_cycles
         copyto!(interior(ocean.model.velocities.w), ensemble_w[i])
         copyto!(interior(ocean.model.free_surface.η), ensemble_η[i])
 
-        # Reset both clocks
         simulation.model.clock.time = t_start
         simulation.model.clock.iteration = 0
         ocean.model.clock.time = t_start
@@ -325,7 +371,6 @@ for cycle in 1:N_cycles
         simulation.stop_time = t_end
         run!(simulation)
 
-        # Extract forecasted state (local)
         ensemble_T[i] = Array(interior(ocean.model.tracers.T))
         ensemble_S[i] = Array(interior(ocean.model.tracers.S))
         ensemble_e[i] = Array(interior(ocean.model.tracers.e))
@@ -337,35 +382,59 @@ for cycle in 1:N_cycles
 
     forecast_time = time() - cycle_start
 
-    # --- Get truth observations at analysis time ---
-    _, obs_idx = findmin(abs.(nature_times .- t_end))
+    # --- Generate Argo-like profile locations for this cycle ---
+    profile_rng = MersenneTwister(obs_seed + cycle)
+    i_profiles = rand(profile_rng, 1:Nx_global, n_profiles_per_cycle)
+    j_profiles = rand(profile_rng, 1:Ny_global, n_profiles_per_cycle)
 
-    # Local truth surface (from per-rank nature run output)
-    T_truth_local = interior(nature_Tt[obs_idx], :, :, 1)
-    S_truth_local = interior(nature_St[obs_idx], :, :, 1)
+    # --- Load nature run 3D state at analysis time ---
+    _, obs_3d_idx = findmin(abs.(nature_3d_times .- t_end))
+    tkey = nature_3d_tkeys[obs_3d_idx]
+    nature_T_3d = nature_3d_fh["timeseries/T/$(tkey)"]
+    nature_S_3d = nature_3d_fh["timeseries/S/$(tkey)"]
 
-    # Thin local observations
-    T_truth_thin = vec(thin_surface(T_truth_local, thin_factor))
-    S_truth_thin = vec(thin_surface(S_truth_local, thin_factor))
+    # --- Extract truth observations at profile locations ---
+    extract_profile_observations!(obs_T_local, nature_T_3d, i_profiles, j_profiles,
+                                   k_obs, Nx, Ny, i_offset, j_offset)
+    extract_profile_observations!(obs_S_local, nature_S_3d, i_profiles, j_profiles,
+                                   k_obs, Nx, Ny, i_offset, j_offset)
 
-    # Gather thinned truth from all ranks
-    T_truth_global = MPI.Allgather(T_truth_thin, comm)
-    S_truth_global = MPI.Allgather(S_truth_thin, comm)
-    y_obs = vcat(T_truth_global, S_truth_global)
+    # Combine across ranks (each rank contributes its local profiles, others are zero)
+    obs_T_truth = MPI.Allreduce(obs_T_local, MPI.SUM, comm)
+    obs_S_truth = MPI.Allreduce(obs_S_local, MPI.SUM, comm)
+    y_obs = vcat(obs_T_truth, obs_S_truth)
 
-    # --- Compute forecast diagnostics ---
-    # Local ensemble mean surface
-    T_ens_local = [e[:, :, Nz_local] for e in ensemble_T]
-    S_ens_local = [e[:, :, Nz_local] for e in ensemble_S]
-    T_mean_local = mean(T_ens_local)
-    S_mean_local = mean(S_ens_local)
+    # --- Filter out land observations ---
+    # Land cells have T=0 in the nature run. Check the surface level of each profile.
+    # A profile is "ocean" if the truth T at the surface level (k_obs[end]) is > 1.
+    valid_mask = trues(n_obs_total)
+    for p in 1:n_profiles_per_cycle
+        surf_idx = (p - 1) * n_obs_levels + n_obs_levels  # last level = surface
+        if abs(obs_T_truth[surf_idx]) < 1.0
+            # This profile is on land - mark all its levels as invalid
+            for l in 1:n_obs_levels
+                valid_mask[(p - 1) * n_obs_levels + l] = false                   # T obs
+                valid_mask[n_obs_per_field + (p - 1) * n_obs_levels + l] = false  # S obs
+            end
+        end
+    end
+    n_valid = sum(valid_mask)
 
-    # Local RMSE contribution (sum of squared differences)
-    local_T_sse = sum((T_mean_local .- T_truth_local) .^ 2)
-    local_S_sse = sum((S_mean_local .- S_truth_local) .^ 2)
-    local_n = length(T_mean_local)
+    # --- Compute surface forecast diagnostics ---
+    # (Uses surface FieldTimeSeries, same metric as before for comparison)
+    _, surf_idx = findmin(abs.(nature_surface_times .- t_end))
+    T_truth_surf = interior(nature_Tt[surf_idx], :, :, 1)
+    S_truth_surf = interior(nature_St[surf_idx], :, :, 1)
 
-    # Global RMSE via MPI reduction
+    T_ens_surf = [e[:, :, Nz_local] for e in ensemble_T]
+    S_ens_surf = [e[:, :, Nz_local] for e in ensemble_S]
+    T_mean_surf = mean(T_ens_surf)
+    S_mean_surf = mean(S_ens_surf)
+
+    local_T_sse = sum((T_mean_surf .- T_truth_surf) .^ 2)
+    local_S_sse = sum((S_mean_surf .- S_truth_surf) .^ 2)
+    local_n = length(T_mean_surf)
+
     global_T_sse = MPI.Allreduce(local_T_sse, MPI.SUM, comm)
     global_S_sse = MPI.Allreduce(local_S_sse, MPI.SUM, comm)
     global_n = MPI.Allreduce(Float64(local_n), MPI.SUM, comm)
@@ -373,9 +442,9 @@ for cycle in 1:N_cycles
     rmse_T_fc = sqrt(global_T_sse / global_n)
     rmse_S_fc = sqrt(global_S_sse / global_n)
 
-    # Ensemble spread (local contribution)
-    local_T_spread_sse = sum(mean((t .- T_mean_local).^2 for t in T_ens_local))
-    local_S_spread_sse = sum(mean((s .- S_mean_local).^2 for s in S_ens_local))
+    # Ensemble spread
+    local_T_spread_sse = sum(mean((t .- T_mean_surf).^2 for t in T_ens_surf))
+    local_S_spread_sse = sum(mean((s .- S_mean_surf).^2 for s in S_ens_surf))
     global_T_spread_sse = MPI.Allreduce(local_T_spread_sse, MPI.SUM, comm)
     global_S_spread_sse = MPI.Allreduce(local_S_spread_sse, MPI.SUM, comm)
     T_sprd = sqrt(global_T_spread_sse / global_n)
@@ -386,35 +455,47 @@ for cycle in 1:N_cycles
     push!(spread_T, T_sprd)
     push!(spread_S, S_sprd)
     push!(analysis_days, day_num)
+    push!(n_valid_obs_log, n_valid)
 
     rank == 0 && @info "  Forecast: SST RMSE=$(round(rmse_T_fc, digits=4)) C, spread=$(round(T_sprd, digits=4)) C"
+    rank == 0 && @info "  Valid obs: $n_valid / $n_obs_total ($(n_profiles_per_cycle) profiles)"
 
     # --- ETKF Analysis ---
-    # Build thinned observation-space ensemble matrix
-    Y_b = zeros(n_obs_global, N_ens)
-    for i in 1:N_ens
-        T_thin_local = vec(thin_surface(ensemble_T[i][:, :, Nz_local], thin_factor))
-        S_thin_local = vec(thin_surface(ensemble_S[i][:, :, Nz_local], thin_factor))
+    if n_valid > 0
+        # Build ensemble observation matrix (all members, all obs)
+        fill!(Y_b_local, 0.0)
+        for i in 1:N_ens
+            extract_profile_observations!(@view(Y_b_local[1:n_obs_per_field, i]),
+                                           ensemble_T[i], i_profiles, j_profiles,
+                                           k_obs, Nx, Ny, i_offset, j_offset)
+            extract_profile_observations!(@view(Y_b_local[n_obs_per_field+1:end, i]),
+                                           ensemble_S[i], i_profiles, j_profiles,
+                                           k_obs, Nx, Ny, i_offset, j_offset)
+        end
 
-        # Gather across ranks
-        T_thin_global = MPI.Allgather(T_thin_local, comm)
-        S_thin_global = MPI.Allgather(S_thin_local, comm)
+        # Single Allreduce for the full ensemble-obs matrix
+        Y_b = MPI.Allreduce(Y_b_local, MPI.SUM, comm)
 
-        Y_b[:, i] = vcat(T_thin_global, S_thin_global)
+        # Apply land mask: only use valid (ocean) observations
+        y_obs_valid = y_obs[valid_mask]
+        Y_b_valid = Y_b[valid_mask, :]
+        R_inv_valid = R_inv[valid_mask]
+
+        # Compute weight matrix (deterministic, same on all ranks)
+        W = compute_etkf_weights(Y_b_valid, y_obs_valid, R_inv_valid)
+
+        # Apply weights to local T and S (full 3D)
+        apply_etkf_update!(ensemble_T, W, inflation)
+        apply_etkf_update!(ensemble_S, W, inflation)
+    else
+        rank == 0 && @warn "  No valid observations this cycle - skipping analysis"
     end
-
-    # Compute weight matrix (same on all ranks - deterministic)
-    W = compute_etkf_weights(Y_b, y_obs, R_inv_global)
-
-    # Apply weights to local T and S (full 3D)
-    apply_etkf_update!(ensemble_T, W, inflation)
-    apply_etkf_update!(ensemble_S, W, inflation)
 
     # --- Analysis diagnostics ---
     T_mean_a = mean([e[:, :, Nz_local] for e in ensemble_T])
     S_mean_a = mean([e[:, :, Nz_local] for e in ensemble_S])
-    local_T_sse_a = sum((T_mean_a .- T_truth_local) .^ 2)
-    local_S_sse_a = sum((S_mean_a .- S_truth_local) .^ 2)
+    local_T_sse_a = sum((T_mean_a .- T_truth_surf) .^ 2)
+    local_S_sse_a = sum((S_mean_a .- S_truth_surf) .^ 2)
     global_T_sse_a = MPI.Allreduce(local_T_sse_a, MPI.SUM, comm)
     global_S_sse_a = MPI.Allreduce(local_S_sse_a, MPI.SUM, comm)
     rmse_T_an = sqrt(global_T_sse_a / global_n)
@@ -426,6 +507,8 @@ for cycle in 1:N_cycles
     cycle_time = time() - cycle_start
     rank == 0 && @info "  Analysis: SST RMSE=$(round(rmse_T_an, digits=4)) C ($(round(forecast_time, digits=1))s forecast, $(round(cycle_time, digits=1))s total)"
 end
+
+close(nature_3d_fh)
 
 total_wall = time() - wall_start
 rank == 0 && @info "DA complete! Total wall time: $(round(total_wall / 60, digits=1)) minutes"
@@ -440,15 +523,10 @@ if rank == 0
             rmse_T_before, rmse_T_after,
             rmse_S_before, rmse_S_after,
             spread_T, spread_S,
-            analysis_days,
-            N_ens, inflation, sigma_T, sigma_S, thin_factor,
+            analysis_days, n_valid_obs_log,
+            N_ens, inflation, sigma_T, sigma_S,
+            n_profiles_per_cycle, obs_depth_limit, n_obs_levels,
             total_wall_seconds=total_wall)
-
-    # Save final ensemble mean (global, gathered from all ranks)
-    T_final_locals = mean(ensemble_T)
-    S_final_locals = mean(ensemble_S)
-    T_final_surf = T_final_locals[:, :, Nz_local]
-    S_final_surf = S_final_locals[:, :, Nz_local]
 end
 
 # Gather final ensemble mean surface to rank 0
@@ -474,7 +552,7 @@ if rank == 0
         fig = Figure(size=(1000, 500))
 
         ax1 = Axis(fig[1, 1], xlabel="Day", ylabel="RMSE (C)",
-                    title="SST RMSE: DA vs Free Run")
+                    title="SST RMSE: Argo-like Obs ($n_profiles_per_cycle profiles/cycle)")
         lines!(ax1, analysis_days, rmse_T_before, linewidth=2, color=:orange,
                label="DA forecast", linestyle=:dash)
         lines!(ax1, analysis_days, rmse_T_after, linewidth=2, color=:green,
@@ -490,36 +568,10 @@ if rank == 0
         save(joinpath(output_dir, "rmse_comparison.png"), fig, px_per_unit=2)
         @info "RMSE comparison plot saved"
 
-        # Final state comparison (using gathered global surface)
-        nature_final_file = joinpath(nature_dir, "final_surface_global.jld2")
-        if isfile(nature_final_file)
-            nature_final = jldopen(nature_final_file)
-            nature_T_final = nature_final["T_surf"]
-            close(nature_final)
-
-            fig2 = Figure(size=(1400, 500))
-            Label(fig2[0, :], "Final SST Comparison (Day $(N_cycles))", fontsize=18, tellwidth=false)
-
-            ax1 = Axis(fig2[1, 1], title="Nature Run (truth)")
-            hm1 = heatmap!(ax1, nature_T_final, colormap=:thermal, colorrange=(10, 32))
-
-            ax2 = Axis(fig2[1, 2], title="DA Ensemble Mean")
-            hm2 = heatmap!(ax2, T_mean_surf_global, colormap=:thermal, colorrange=(10, 32))
-
-            ax3 = Axis(fig2[1, 3], title="DA Mean - Nature")
-            T_da_diff = T_mean_surf_global .- nature_T_final
-            hm3 = heatmap!(ax3, T_da_diff, colormap=:balance, colorrange=(-1, 1))
-
-            Colorbar(fig2[1, 4], hm1, label="C")
-
-            save(joinpath(output_dir, "final_comparison.png"), fig2, px_per_unit=2)
-            @info "Final comparison plot saved"
-        end
-
         # Ensemble spread plot
         fig3 = Figure(size=(800, 400))
         ax = Axis(fig3[1, 1], xlabel="Day", ylabel="Value",
-                  title="Ensemble Diagnostics Over Time")
+                  title="Ensemble Diagnostics (Argo-like, $(n_profiles_per_cycle) profiles x $(n_obs_levels) levels)")
         lines!(ax, analysis_days, spread_T, linewidth=2, color=:purple, label="T spread (C)")
         lines!(ax, analysis_days, 10 .* spread_S, linewidth=2, color=:blue,
                label="S spread (x10, psu)")

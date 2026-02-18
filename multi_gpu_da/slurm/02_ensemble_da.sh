@@ -51,6 +51,14 @@ for r in 0 1 2 3; do
     fi
 done
 
+for r in 0 1 2 3; do
+    if [ ! -f "${OUTPUT_BASE}/nature_run/tracers_3d_rank${r}.jld2" ]; then
+        echo "ERROR: Nature run 3D tracer file for rank${r} not found."
+        echo "Re-run the nature run with the updated nature_run.jl (includes daily 3D output)."
+        exit 1
+    fi
+done
+
 if [ ! -f "${OUTPUT_BASE}/nature_run/surface_fields_rank0.jld2" ]; then
     echo "ERROR: Nature run surface fields not found."
     exit 1
