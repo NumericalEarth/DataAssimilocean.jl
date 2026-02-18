@@ -82,10 +82,11 @@ fi
 echo ""
 echo "========== STEP 2: NATURE RUN (14 days) =========="
 
-# Skip if all 4 rank surface field files already exist
+# Skip if all 4 rank surface AND 3D tracer files already exist
 NATURE_DONE=true
 for r in 0 1 2 3; do
-    if [ ! -f "${OUTPUT_BASE}/nature_run/surface_fields_rank${r}.jld2" ]; then
+    if [ ! -f "${OUTPUT_BASE}/nature_run/surface_fields_rank${r}.jld2" ] || \
+       [ ! -f "${OUTPUT_BASE}/nature_run/tracers_3d_rank${r}.jld2" ]; then
         NATURE_DONE=false
         break
     fi
@@ -113,19 +114,32 @@ fi
 # ===== STEP 3: FREE RUN (14 days, 4 GPUs) =====
 echo ""
 echo "========== STEP 3: FREE RUN (14 days, perturbed IC) =========="
-echo "Start: $(date)"
-STEP_START=$SECONDS
 
-srun -n 4 $JULIA --project multi_gpu_da/free_run.jl \
-    "${OUTPUT_BASE}/spinup" \
-    "${OUTPUT_BASE}/free_run"
+FREE_DONE=true
+for r in 0 1 2 3; do
+    if [ ! -f "${OUTPUT_BASE}/free_run/final_state_rank${r}.jld2" ]; then
+        FREE_DONE=false
+        break
+    fi
+done
 
-STEP_EXIT=$?
-STEP_TIME=$(( SECONDS - STEP_START ))
-echo "Free run finished: exit=${STEP_EXIT}, wall=${STEP_TIME}s ($(( STEP_TIME / 60 ))m)"
-if [ $STEP_EXIT -ne 0 ]; then
-    echo "ERROR: Free run failed!"
-    exit $STEP_EXIT
+if [ "$FREE_DONE" = true ]; then
+    echo "SKIP: Free run state files already exist, skipping."
+else
+    echo "Start: $(date)"
+    STEP_START=$SECONDS
+
+    srun -n 4 $JULIA --project multi_gpu_da/free_run.jl \
+        "${OUTPUT_BASE}/spinup" \
+        "${OUTPUT_BASE}/free_run"
+
+    STEP_EXIT=$?
+    STEP_TIME=$(( SECONDS - STEP_START ))
+    echo "Free run finished: exit=${STEP_EXIT}, wall=${STEP_TIME}s ($(( STEP_TIME / 60 ))m)"
+    if [ $STEP_EXIT -ne 0 ]; then
+        echo "ERROR: Free run failed!"
+        exit $STEP_EXIT
+    fi
 fi
 
 # ===== STEP 4: COMPARISON (serial, 1 GPU) =====
