@@ -128,6 +128,68 @@ Hurricane Irma (Sept 2017) context for our domain (Atlantic, 100W-0E, 10S-60N):
 - [ ] Compare DA improvement in terms of hurricane-relevant quantities
 - [ ] Frame results in terms of intensity forecast improvement
 
+## ETKF vs EnKF and Operational Ocean DA Methods
+
+### Ensemble Kalman Filter Variants
+
+| Method | Type | Key Feature | Pros | Cons |
+|--------|------|-------------|------|------|
+| **EnKF** (Evensen 1994) | Stochastic | Perturbed observations | Simple to implement | Sampling noise from perturbed obs |
+| **ETKF** (Bishop et al. 2001) | Deterministic square root | Transform in ensemble space | No perturbed obs noise; works in N_ens space | Can cluster in nonlinear regimes |
+| **EnSRF** (Whitaker & Hamill 2002) | Deterministic square root | Serial obs processing | Exact posterior covariance | Serial processing limits parallelism |
+| **LETKF** (Hunt et al. 2007) | Localized ETKF | Local analysis at each grid point | Embarrassingly parallel; natural localization | Must choose localization radius |
+| **DEnKF** (Sakov & Oke 2008) | Deterministic | Half the anomaly update | Simple; avoids square root | Approximate |
+| **EAKF** (Anderson 2001) | Deterministic | Adjustment Kalman filter | Exact marginal posteriors | |
+| **SEEK/SEIK** (Pham et al. 1998) | Reduced-rank | Static or slowly-evolving ensemble | Works with few modes (7-30) | Less flow-dependent than full EnKF |
+
+**ETKF** (what we use): Computes analysis entirely in ensemble space. The weight matrix is N_ens × N_ens, so computational cost scales with ensemble size, not state or observation dimension. No perturbed observations means no sampling noise, but the deterministic transform can cause ensemble members to cluster in highly nonlinear regimes.
+
+**EnKF** (original): Each member gets different perturbed observations (y + ε, ε ~ N(0,R)), introducing sampling noise that grows as observation error decreases or observation count increases. With many observations relative to ensemble size, this noise can dominate.
+
+**LETKF**: The most popular variant for large-scale geophysical DA. Performs ETKF independently at each grid point using only nearby observations (localization). Embarrassingly parallel — each grid point is independent. This is what we should target if staying with ensemble methods.
+
+### What Operational Ocean DA Systems Use
+
+| System | Organization | Method | Ensemble Size | Window | Resolution |
+|--------|-------------|--------|---------------|--------|------------|
+| **RTOFS** | NCEP/USA | 3DVAR (NCODA) | None | 24 hr | 1/12 deg |
+| **GOFS 3.1** | US Navy | 3DVAR (NCODA) | None | 24 hr | 1/12 deg (HYCOM) |
+| **FOAM** | Met Office/UK | 3DVAR FGAT (NEMOVAR) | None | 1 day | 1/12 deg (NEMO) |
+| **ORAS5** | ECMWF | 3DVAR FGAT + bias correction | 5 (for uncertainty) | 5 days | 1/4 deg (NEMO) |
+| **GLORYS12** | Mercator/France | **SEEK** + 3DVAR bias correction | 7 modes (reduced-rank) | 7 days | 1/12 deg (NEMO) |
+| **TOPAZ** | NERSC/Norway | **DEnKF** | **100 members** | 7 days | ~12 km (HYCOM) |
+| **BRAN** | BOM/Australia | EnOI → hybrid EnKF | Static ensemble | 3 days | 1/10 deg |
+| **ROMS 4DVAR** | Research | 4DVAR (adjoint) | None | 3-7 days | Variable |
+
+### Key Observations
+
+1. **Most operational systems use variational methods (3DVAR/4DVAR)**, not ensemble methods. This is because:
+   - Variational methods don't suffer from ensemble collapse
+   - They can handle millions of observations without rank deficiency
+   - The adjoint model provides exact gradient information
+   - They've been operational longer and are more mature
+
+2. **GLORYS12** (the most widely-used ocean reanalysis) uses **SEEK** — a reduced-rank Kalman filter with only 7 ensemble modes (not full ensemble members). These modes are computed from a long free-run simulation and represent the dominant ocean variability patterns. Combined with 3DVAR for bias correction on a 7-day window.
+
+3. **TOPAZ is the exception**: Uses a full dynamical DEnKF with 100 ensemble members. This is the closest to what we're doing but at operational scale. They use:
+   - 100 members (our target)
+   - Localization (critical — we need this)
+   - 7-day analysis windows
+   - DEnKF instead of ETKF (deterministic, no square root)
+
+4. **The trend** in operational ocean DA is toward hybrid ensemble-variational methods:
+   - Use ensemble covariances for flow-dependent background error
+   - Embed in variational framework for observation handling
+   - Avoids pure ensemble limitations while capturing flow dependence
+
+5. **4DVAR is powerful but expensive**: Requires developing and maintaining the adjoint (tangent-linear) model. This is exactly what Reactant.jl / Enzyme could enable — automatic differentiation eliminates the need for hand-coded adjoints, which is the main barrier to 4DVAR in ocean models.
+
+### Implications for Our Work
+
+- **Short term (ETKF)**: We need localization (LETKF via Manteia.jl) and more ensemble members (100, like TOPAZ) to make the ensemble approach viable
+- **Long term (4DVAR)**: The differentiable workflow with Reactant.jl/Enzyme is scientifically the most compelling direction — it would be the first automatic-differentiation-based 4DVAR for a full-complexity ocean model, leapfrogging the hand-coded adjoints that limit current operational systems
+- **The ETKF experiments serve as a baseline** to demonstrate what ensemble methods can achieve (and where they struggle), motivating the variational approach
+
 ## References
 
 - Halliwell et al. (2017): OSSE for evaluating ocean observing systems — satellite altimetry has greatest impact, then Argo, then SST
@@ -136,3 +198,9 @@ Hurricane Irma (Sept 2017) context for our domain (Atlantic, 100W-0E, 10S-60N):
 - Jean-Michel et al. (2021): GLORYS12 reanalysis — subsurface T errors 0.45-0.75 C
 - Deser et al. (2003): SST persistence timescale ~11-14 days
 - Storto et al. (2019): Synthesis of operational ocean DA systems
+- Evensen (1994): Sequential data assimilation with a nonlinear quasi-geostrophic model using Monte Carlo methods
+- Bishop et al. (2001): Adaptive sampling with the ensemble transform Kalman filter
+- Hunt et al. (2007): Efficient data assimilation for spatiotemporal chaos: a local ensemble transform Kalman filter
+- Pham et al. (1998): Singular evolutive extended Kalman filter (SEEK)
+- Sakov & Oke (2008): A deterministic formulation of the ensemble Kalman filter (DEnKF)
+- Sakov et al. (2012): TOPAZ4 — an ocean-sea ice data assimilation system for the North Atlantic and Arctic
