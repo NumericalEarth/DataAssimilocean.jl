@@ -64,6 +64,12 @@ if [ ! -f "${OUTPUT_BASE}/nature_run/surface_fields_rank0.jld2" ]; then
     exit 1
 fi
 
+if [ ! -f "${OUTPUT_BASE}/free_run/surface_fields_rank0.jld2" ]; then
+    echo "ERROR: Free run surface fields not found."
+    echo "Run the pipeline (01_pipeline.sh) first to generate the free run."
+    exit 1
+fi
+
 echo ""
 echo "========== ENSEMBLE DA (10 members, 14 cycles, 4 GPUs) =========="
 echo "Start: $(date)"

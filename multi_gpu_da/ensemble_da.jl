@@ -73,12 +73,12 @@ n_profiles_per_cycle = 76
 obs_depth_limit = -1000.0   # meters: observe upper 1000m only
 obs_seed = 12345            # base seed for reproducible profile locations
 
-# Perturbation parameters
-T_noise_std = 0.5
-S_noise_std = 0.05
-T_bias = 0.3
-S_bias = 0.02
-noise_depth_levels = 20
+# Perturbation parameters: depth-dependent, subsurface-focused
+T_noise_std = 0.5   # C, ensemble spread (scaled by depth profile)
+S_noise_std = 0.05  # PSU, ensemble spread
+T_bias_max = 1.5    # C, bias at thermocline (~150m depth)
+S_bias_max = 0.1    # PSU, bias at thermocline
+z_peak = -150.0     # depth of maximum perturbation (m)
 
 # Dates
 start_date = DateTime(2017, 8, 25)
@@ -171,6 +171,16 @@ function extract_profile_observations!(obs_vector, field_3d, i_global, j_global,
     end
 end
 
+"""
+Depth-dependent perturbation profile. Maximum at z_peak, zero at surface,
+decaying below. Returns value in [0, 1].
+"""
+function perturbation_profile(z; z_peak=-150.0)
+    z >= 0 && return 0.0
+    d = -z / (-z_peak)
+    return d * exp(1 - d)
+end
+
 # ============================================================================
 #                           SETUP
 # ============================================================================
@@ -193,6 +203,9 @@ for k in 1:Nz
 end
 n_obs_levels = length(k_obs)
 rank == 0 && @info "  Observation levels: $n_obs_levels (k=$(k_obs[1]):$(k_obs[end]), depth $(obs_depth_limit)m to surface)"
+
+# Compute z-centers for depth-dependent perturbations
+z_centers = [0.5 * (z_faces[k] + z_faces[k+1]) for k in 1:Nz]
 
 # Rank-aware bathymetry (cached from spinup)
 bathy_file = joinpath(spinup_dir, "bathymetry_$(Nx)x$(Ny)_rank$(rank).jld2")
@@ -244,6 +257,13 @@ nature_Tt = FieldTimeSeries(nature_surface_file, "T")
 nature_St = FieldTimeSeries(nature_surface_file, "S")
 nature_surface_times = nature_Tt.times
 
+# Load free run surface fields for baseline comparison
+rank == 0 && @info "Loading free run surface fields..."
+free_surface_file = joinpath(free_dir, "surface_fields_rank$(rank).jld2")
+free_Tt = FieldTimeSeries(free_surface_file, "T")
+free_St = FieldTimeSeries(free_surface_file, "S")
+free_surface_times = free_Tt.times
+
 # ============================================================================
 #                           INITIALIZE ENSEMBLE
 # ============================================================================
@@ -258,7 +278,6 @@ ensemble_w = Vector{Array{Float64, 3}}(undef, N_ens)
 ensemble_η = Vector{Any}(undef, N_ens)
 
 Nz_local = size(spinup_state.T, 3)
-k_pert_start = max(1, Nz_local - noise_depth_levels + 1)
 
 for i in 1:N_ens
     rng = MersenneTwister(42 + i + rank * 1000)
@@ -266,9 +285,10 @@ for i in 1:N_ens
     T_i = copy(spinup_state.T)
     S_i = copy(spinup_state.S)
 
-    for k in k_pert_start:Nz_local
-        T_i[:, :, k] .+= T_noise_std .* randn(rng, Nx, Ny) .+ T_bias
-        S_i[:, :, k] .+= S_noise_std .* randn(rng, Nx, Ny) .+ S_bias
+    for k in 1:Nz_local
+        α = perturbation_profile(z_centers[k]; z_peak)
+        T_i[:, :, k] .+= α .* (T_noise_std .* randn(rng, Nx, Ny) .+ T_bias_max)
+        S_i[:, :, k] .+= α .* (S_noise_std .* randn(rng, Nx, Ny) .+ S_bias_max)
     end
 
     ensemble_T[i] = T_i
@@ -335,8 +355,10 @@ R_inv = vcat(fill(1.0 / sigma_T^2, n_obs_per_field),
 # Diagnostics storage
 rmse_T_before = Float64[]
 rmse_T_after = Float64[]
+rmse_T_free = Float64[]
 rmse_S_before = Float64[]
 rmse_S_after = Float64[]
+rmse_S_free = Float64[]
 spread_T = Float64[]
 spread_S = Float64[]
 analysis_days = Float64[]
@@ -450,14 +472,28 @@ for cycle in 1:N_cycles
     T_sprd = sqrt(global_T_spread_sse / global_n)
     S_sprd = sqrt(global_S_spread_sse / global_n)
 
+    # Free run baseline RMSE
+    _, free_idx = findmin(abs.(free_surface_times .- t_end))
+    T_free_surf = interior(free_Tt[free_idx], :, :, 1)
+    S_free_surf = interior(free_St[free_idx], :, :, 1)
+    local_T_sse_free = sum((T_free_surf .- T_truth_surf) .^ 2)
+    local_S_sse_free = sum((S_free_surf .- S_truth_surf) .^ 2)
+    global_T_sse_free = MPI.Allreduce(local_T_sse_free, MPI.SUM, comm)
+    global_S_sse_free = MPI.Allreduce(local_S_sse_free, MPI.SUM, comm)
+    rmse_T_free_val = sqrt(global_T_sse_free / global_n)
+    rmse_S_free_val = sqrt(global_S_sse_free / global_n)
+
     push!(rmse_T_before, rmse_T_fc)
     push!(rmse_S_before, rmse_S_fc)
+    push!(rmse_T_free, rmse_T_free_val)
+    push!(rmse_S_free, rmse_S_free_val)
     push!(spread_T, T_sprd)
     push!(spread_S, S_sprd)
     push!(analysis_days, day_num)
     push!(n_valid_obs_log, n_valid)
 
-    rank == 0 && @info "  Forecast: SST RMSE=$(round(rmse_T_fc, digits=4)) C, spread=$(round(T_sprd, digits=4)) C"
+    rank == 0 && @info "  Free run SST RMSE=$(round(rmse_T_free_val, digits=4)) C"
+    rank == 0 && @info "  DA forecast SST RMSE=$(round(rmse_T_fc, digits=4)) C, spread=$(round(T_sprd, digits=4)) C"
     rank == 0 && @info "  Valid obs: $n_valid / $n_obs_total ($(n_profiles_per_cycle) profiles)"
 
     # --- ETKF Analysis ---
@@ -520,8 +556,8 @@ rank == 0 && @info "DA complete! Total wall time: $(round(total_wall / 60, digit
 if rank == 0
     @info "Saving diagnostics..."
     jldsave(joinpath(output_dir, "ensemble_diagnostics.jld2");
-            rmse_T_before, rmse_T_after,
-            rmse_S_before, rmse_S_after,
+            rmse_T_before, rmse_T_after, rmse_T_free,
+            rmse_S_before, rmse_S_after, rmse_S_free,
             spread_T, spread_S,
             analysis_days, n_valid_obs_log,
             N_ens, inflation, sigma_T, sigma_S,
@@ -552,7 +588,9 @@ if rank == 0
         fig = Figure(size=(1000, 500))
 
         ax1 = Axis(fig[1, 1], xlabel="Day", ylabel="RMSE (C)",
-                    title="SST RMSE: Argo-like Obs ($n_profiles_per_cycle profiles/cycle)")
+                    title="SST RMSE: DA vs Free Run")
+        lines!(ax1, analysis_days, rmse_T_free, linewidth=2, color=:red,
+               label="Free run (no DA)")
         lines!(ax1, analysis_days, rmse_T_before, linewidth=2, color=:orange,
                label="DA forecast", linestyle=:dash)
         lines!(ax1, analysis_days, rmse_T_after, linewidth=2, color=:green,
@@ -561,6 +599,7 @@ if rank == 0
 
         ax2 = Axis(fig[1, 2], xlabel="Day", ylabel="Spread / RMSE (C)",
                     title="Ensemble Spread vs RMSE")
+        lines!(ax2, analysis_days, rmse_T_free, linewidth=2, color=:red, label="Free run RMSE")
         lines!(ax2, analysis_days, rmse_T_before, linewidth=2, color=:orange, label="Forecast RMSE")
         lines!(ax2, analysis_days, spread_T, linewidth=2, color=:purple, label="Spread")
         axislegend(ax2, position=:lt)
@@ -588,6 +627,7 @@ end
 
 MPI.Barrier(comm)
 rank == 0 && @info "Ensemble DA experiment complete!"
+rank == 0 && @info "  Final free run SST RMSE: $(round(rmse_T_free[end], digits=4)) C"
 rank == 0 && @info "  Final forecast SST RMSE: $(round(rmse_T_before[end], digits=4)) C"
 rank == 0 && @info "  Final analysis SST RMSE: $(round(rmse_T_after[end], digits=4)) C"
 rank == 0 && @info "  Output: $output_dir"
