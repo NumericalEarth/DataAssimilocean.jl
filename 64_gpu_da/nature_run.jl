@@ -1,10 +1,10 @@
-# Multi-GPU nature run (14 days from spinup end state)
+# 64-GPU nature run (14 days from spinup end state)
 #
 # Loads per-rank spinup state and continues for 14 days.
 # This is the "ground truth" for the DA experiment.
 #
 # Usage:
-#   srun -n 4 julia --project multi_gpu_da/nature_run.jl SPINUP_DIR OUTPUT_DIR
+#   srun -n 64 julia --project 64_gpu_da/nature_run.jl SPINUP_DIR OUTPUT_DIR
 
 using MPI
 MPI.Init()
@@ -27,18 +27,18 @@ mkpath(output_dir)
 #                           CONFIGURATION
 # ============================================================================
 
-resolution = 1/8
+resolution = 1/32
 Δt = 5minutes
-substeps = 60
+substeps = 240
 run_days = 14
 
 start_date = DateTime(2017, 8, 25)
 end_date = start_date + Day(run_days)
 
-@assert nranks == 4 "Expected 4 MPI ranks, got $nranks"
-arch = Distributed(GPU(); partition=Partition(2, 2))
+@assert nranks == 64 "Expected 64 MPI ranks, got $nranks"
+arch = Distributed(GPU(); partition=Partition(8, 8))
 
-rank == 0 && @info "Nature Run (Multi-GPU): $run_days days at $(resolution) deg"
+rank == 0 && @info "Nature Run (64-GPU): $run_days days at $(resolution) deg"
 
 # ============================================================================
 #                           GRID AND MODEL
