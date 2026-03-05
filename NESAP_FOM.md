@@ -28,15 +28,14 @@ Weak scaling: same local grid size per GPU (~400×280×50), increasing total res
 - **SYPD = (5 min / 0.1034 s) × (1/1440) × 365 ≈ 12.3 SYPD**
 
 ### 64 GPU — 1/32° resolution (3200×2240×50, Partition 8×8)
-- Job: 49655390 (64_gpu_da pipeline), 16 nodes
-- Wall per 100 steps: ~5.28 minutes = 316.6 seconds (blew up with NaN but timing valid)
-- Δt = 2.5 minutes, substeps = 240
-- **s/step = 3.166**
-- **SYPD = (2.5 min / 3.166 s) × (1/1440) × 365 ≈ 0.20 SYPD**
-- NOTE: NaN blowup doesn't affect timing validity — compute was real work
+- Job: 49655390 ran but experienced NaN blowup — **timing unreliable**
+  (NaN propagation distorts per-step compute time)
+- Target Δt = 1 minute (4× finer grid than 1/8° requires ~4× smaller timestep)
+- Substeps = 240
+- Clean benchmark pending (job 49687138)
 
 ### Pending benchmarks
-- 8 GPU — 1/16° (job 49688114, regular queue)
+- 8 GPU — 1/16° (job 49688114, regular queue, Δt=1min)
 - 64 GPU — 1/32° (job 49687138, regular queue, 100 steps with Δt=1min)
 
 ## NESAP Form Fields

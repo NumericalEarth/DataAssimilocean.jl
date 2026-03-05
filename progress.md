@@ -185,11 +185,14 @@ grid of ~400×280×50 per GPU.
 |------|-------|-----------|------------------|-------|----------|--------|-------|----------|
 | 1    | shared| 1/4°      | 400×280×50       | 5 min | 30       | 0.061  | 20.5  | 48948679 |
 | 4    | 1     | 1/8°      | 800×560×50       | 5 min | 60       | 0.103  | 12.3  | 49011223 |
-| 64   | 16    | 1/32°     | 3200×2240×50     | 2.5 min| 240     | TBD*   | TBD   | pending  |
+| 8    | 2     | 1/16°     | 1600×1120×50     | 1 min | 120      | TBD    | TBD   | pending  |
+| 64   | 16    | 1/32°     | 3200×2240×50     | 1 min | 240      | TBD    | TBD   | pending  |
 
-*The 64-GPU run (job 49655390) produced timing of 3.17 s/step but experienced a numerical
-instability (NaN) that may inflate this measurement. Clean benchmark jobs are pending
-(8-GPU: job 49688114, 64-GPU: job 49687138).
+Clean benchmark jobs are pending (8-GPU: job 49688114, 64-GPU: job 49687138).
+Note: the 1/32° grid is 4× finer than 1/8°, requiring Δt ≈ 1 min (reduced from 5 min)
+for CFL stability. A previous 64-GPU run reported 3.17 s/step, but this timing is
+unreliable because the simulation experienced NaN blowup (NaN propagation distorts
+per-step timing).
 
 **Platform:** NERSC Perlmutter, NVIDIA A100 GPUs, Cray MPICH (GPU-aware, no NCCL).
 
@@ -209,13 +212,19 @@ inter-node data point using Cray MPICH over libfabric (Slingshot-11).
 
 ### 3.3 Extrapolated 64-GPU Performance
 
-From the 4-GPU baseline, the expected 64-GPU scaling is:
+From the 4-GPU baseline (0.103 s/step at 1/8°), the expected 64-GPU scaling at 1/32° is:
 
-- Substeps: 60 → 240 (4× increase from 1/8° → 1/32°)
-- Communication: 1 node → 16 nodes (inter-node overhead TBD from 8-GPU benchmark)
-- Estimated communication overhead factor: 1.3–2.0×
+- **Substeps:** 60 → 240 (4× increase, grid is 4× finer)
+- **Communication:** 1 node → 16 nodes (inter-node overhead TBD from 8-GPU benchmark)
+- **Estimated communication overhead factor:** 1.3–2.0×
 
 **Estimated 64-GPU s/step:** 0.103 × 4 × (1.3 to 2.0) = **0.54 to 0.82 s/step**
+
+Note: the 4-GPU measurement is intra-node only (NVLink), providing no constraint on
+inter-node communication cost. The 8-GPU benchmark (2 nodes) will provide the first
+inter-node data point and significantly narrow the estimated range. Perlmutter uses
+Cray MPICH over Slingshot-11 libfabric (no NCCL), so inter-node overhead may be
+substantial.
 
 This will be validated by the pending 8-GPU and 64-GPU benchmarks.
 
@@ -229,18 +238,22 @@ This will be validated by the pending 8-GPU and 64-GPU benchmarks.
 - **Ensemble size:** 100 members (required for adequate covariance sampling)
 - **GPUs per member forecast:** 64 (16 nodes)
 - **Analysis window:** 1 day
-- **Timestep:** Δt = 2.5 min → 576 steps per day
+- **Timestep:** Δt = 1 min → 1,440 steps per day
 - **Number of DA cycles:** 14 (14-day experiment)
 
 ### 4.2 Cost Per DA Cycle
 
 **Forecast step** (dominates cost):
 
+The 1/32° grid is 4× finer than 1/8°, requiring Δt ≈ 1 min for CFL stability and 4×
+more barotropic substeps (240 vs 60). We estimate the 64-GPU s/step by scaling from
+the clean 4-GPU (intra-node) measurement, plus an inter-node communication overhead
+factor that will be constrained by the pending 8-GPU (2-node) benchmark.
+
 | Scenario | s/step | Wall time/member | GPU-hrs/member | GPU-hrs/cycle (×100) |
 |----------|--------|-----------------|----------------|---------------------|
-| Optimistic (0.54 s/step) | 0.54 | 5.2 min | 5.5 | 550 |
-| Mid-range (0.82 s/step)  | 0.82 | 7.9 min | 8.4 | 840 |
-| Conservative (3.17 s/step)| 3.17 | 30.4 min | 32.4 | 3,240 |
+| Optimistic (1.3× comm) | 0.54 | 13.0 min | 13.8 | 1,380 |
+| Mid-range (2× comm)    | 0.82 | 19.7 min | 21.0 | 2,100 |
 
 **Analysis step** (LETKF): ~3 min on a single GPU — negligible relative to forecast.
 
@@ -248,9 +261,8 @@ This will be validated by the pending 8-GPU and 64-GPU benchmarks.
 
 | Scenario | GPU-hours | Node-hours (4 GPU/node) | Wall time @ 6,400 GPUs |
 |----------|-----------|------------------------|----------------------|
-| Optimistic  | 7,700     | 1,925                  | ~1.2 hours           |
-| Mid-range   | 11,800    | 2,950                  | ~1.8 hours           |
-| Conservative| 45,400    | 11,350                 | ~7.1 hours           |
+| Optimistic  | 19,300    | 4,825                  | ~3.0 hours           |
+| Mid-range   | 29,400    | 7,350                  | ~4.6 hours           |
 
 Additional overhead (spinup + nature run): ~500–1,000 GPU-hours.
 
