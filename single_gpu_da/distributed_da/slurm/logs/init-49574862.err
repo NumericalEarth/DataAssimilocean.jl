@@ -1,0 +1,32 @@
+[ Info: Initializing 10 ensemble members
+[ Info:   Spinup dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/spinup
+[ Info:   Output dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info: Created grid: 400 × 280 × 50 at 0.25° resolution
+ERROR: LoadError: Scalar indexing is disallowed.
+Invocation of getindex resulted in scalar indexing of a GPU array.
+This is typically caused by calling an iterating implementation of a method.
+Such implementations *do not* execute on the GPU, but very slowly on the CPU,
+and therefore should be avoided.
+
+If you want to allow scalar iteration, use `allowscalar` or `@allowscalar`
+to enable scalar iteration globally or for the operations in question.
+Stacktrace:
+ [1] error(s::String)
+   @ Base ./error.jl:35
+ [2] errorscalar(op::String)
+   @ GPUArraysCore ~/.julia/packages/GPUArraysCore/aNaXo/src/GPUArraysCore.jl:151
+ [3] _assertscalar(op::String, behavior::GPUArraysCore.ScalarIndexing)
+   @ GPUArraysCore ~/.julia/packages/GPUArraysCore/aNaXo/src/GPUArraysCore.jl:124
+ [4] assertscalar(op::String)
+   @ GPUArraysCore ~/.julia/packages/GPUArraysCore/aNaXo/src/GPUArraysCore.jl:112
+ [5] getindex(A::CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}, I::Int64)
+   @ GPUArrays ~/.julia/packages/GPUArrays/nc02F/src/host/indexing.jl:50
+ [6] (::var"#14#15")(k::Int64)
+   @ Main ./none:0
+ [7] iterate
+   @ ./generator.jl:48 [inlined]
+ [8] collect(itr::Base.Generator{UnitRange{Int64}, var"#14#15"})
+   @ Base ./array.jl:791
+ [9] top-level scope
+   @ /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/initialize_ensemble.jl:30
+in expression starting at /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/initialize_ensemble.jl:30

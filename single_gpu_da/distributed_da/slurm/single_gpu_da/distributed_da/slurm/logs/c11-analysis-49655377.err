@@ -1,0 +1,24 @@
+[ Info: LETKF Analysis (localized)
+[ Info:   Cycle: 11 / 14
+[ Info:   Ensemble size: 10
+[ Info:   Ensemble dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Output dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Diagnostics dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/diagnostics
+[ Info:   Analysis time: day 11.0
+[ Info: Created grid: 400 × 280 × 50 at 0.25° resolution
+[ Info:   Observation levels: 8 (of 31 above -1000.0m)
+[ Info: Loading cached bathymetry from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/spinup/bathymetry_400x280.jld2
+[ Info: Loading 10 member forecasts from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/forecast_11...
+[ Info: Loading nature run 3D tracers...
+[ Info: Loading nature surface observations...
+[ Info: Loading free run surface fields...
+[ Info:   Free run SST RMSE=0.8664 C
+[ Info:   DA forecast SST RMSE=0.9706 C, spread=0.088 C
+[ Info:   Valid obs: 816 / 1216 (76 profiles)
+[ Info:   LETKF with 1000.0 km localization radius
+[ Info:   LETKF: updated 38502 columns, skipped 73498 (no nearby obs)
+[ Info:   LETKF completed in 9.7s
+[ Info:   Analysis: SST RMSE=1.1153 C
+[ Info: Analysis states saved to /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/cycle_11
+[ Info: Cycle diagnostics saved to /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/diagnostics/cycle_11_diagnostics.jld2
+[ Info: Analysis cycle 11 complete.
