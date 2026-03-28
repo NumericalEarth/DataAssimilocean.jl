@@ -1,0 +1,42 @@
+[ Info: Ensemble member forecast
+[ Info:   Cycle: 6
+[ Info:   Members: 9 to 10
+[ Info:   Ensemble dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Output dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Time window: 5.0 to 6.0 days
+[ Info: Creating grid...
+[ Info: Created grid: 400 × 280 × 50 at 0.25° resolution
+[ Info: Loading cached bathymetry from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/spinup/bathymetry_400x280.jld2
+[ Info: Creating ocean model...
+┌ Warning: Split barotropic-baroclinic time stepping with SplitRungeKutta3TimeStepper is experimental.
+│ Use at own risk, and report any issues encountered at https://github.com/CliMA/Oceananigans.jl/issues.
+└ @ Oceananigans.TimeSteppers ~/.julia/packages/Oceananigans/dV6yg/src/TimeSteppers/split_hydrostatic_runge_kutta_3.jl:59
+[ Info: Setting up atmosphere...
+[ Info: Loading member 9 for warm-up compilation...
+[ Info: Compiling (warm-up timestep)...
+[ Info: Initializing simulation...
+[ Info:     ... simulation initialization complete (2.336 minutes)
+[ Info: Executing initial time step...
+[ Info: Simulation is stopping after running for 0 seconds.
+[ Info: Simulation time 5.003 days equals or exceeds stop time 5.003 days.
+[ Info:     ... initial time step complete (1.896 minutes).
+[ Info: Compilation complete.
+┌ Warning: Assignment to `state` in soft scope is ambiguous because a global variable by the same name exists: `state` will be treated as a new local. Disambiguate by using `local state` to suppress this warning or `global state` to assign to the existing global variable.
+└ @ /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/ensemble_member.jl:100
+[ Info: === Member 9 (cycle 6) ===
+[ Info: Initializing simulation...
+[ Info:     ... simulation initialization complete (23.456 ms)
+[ Info: Executing initial time step...
+[ Info:     ... initial time step complete (72.513 ms).
+[ Info: Simulation is stopping after running for 17.103 seconds.
+[ Info: Simulation time 6 days equals or exceeds stop time 6 days.
+[ Info:   Member 9 done. T range: (-1.9359647611249153, 35.45905912313173)
+[ Info: === Member 10 (cycle 6) ===
+[ Info: Initializing simulation...
+[ Info:     ... simulation initialization complete (18.639 ms)
+[ Info: Executing initial time step...
+[ Info:     ... initial time step complete (60.121 ms).
+[ Info: Simulation is stopping after running for 17.479 seconds.
+[ Info: Simulation time 6 days equals or exceeds stop time 6 days.
+[ Info:   Member 10 done. T range: (-1.8546230149928251, 35.13386008933865)
+[ Info: Member forecast complete. Members 9:10 saved to /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/forecast_06

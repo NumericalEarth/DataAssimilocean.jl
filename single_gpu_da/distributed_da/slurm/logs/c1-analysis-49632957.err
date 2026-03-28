@@ -1,0 +1,32 @@
+[ Info: LETKF Analysis (localized)
+[ Info:   Cycle: 1 / 14
+[ Info:   Ensemble size: 10
+[ Info:   Ensemble dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Output dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Diagnostics dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/diagnostics
+[ Info:   Analysis time: day 1.0
+[ Info: Created grid: 400 × 280 × 50 at 0.25° resolution
+[ Info: Loading cached bathymetry from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/spinup/bathymetry_400x280.jld2
+[ Info: Loading 10 member forecasts from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/forecast_01...
+[ Info: Loading nature run 3D tracers...
+[ Info: Loading nature surface observations...
+[ Info: Loading free run surface fields...
+[ Info:   Free run SST RMSE=0.9882 C
+[ Info:   DA forecast SST RMSE=0.5852 C, spread=0.0681 C
+[ Info:   Valid obs: 2542 / 4712 (76 profiles)
+ERROR: LoadError: MethodError: no method matching xnodes(::LatitudeLongitudeGrid{Float64, Bounded, Bounded, Bounded, Oceananigans.Grids.StaticVerticalDiscretization{OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}, OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}, OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}, OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}}, Float64, Float64, OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, Float64, Float64, OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}}, OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}, OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}, OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}, OffsetArrays.OffsetVector{Float64, CUDA.CuArray{Float64, 1, CUDA.DeviceMemory}}, Float64, Float64, GPU{CUDA.CUDAKernels.CUDABackend}, Int64}, ::Center)
+The function `xnodes` exists, but no method is defined for this combination of argument types.
+
+Closest candidates are:
+  xnodes(::LatitudeLongitudeGrid, ::Any, !Matched::Any, !Matched::Any; with_halos)
+   @ Oceananigans ~/.julia/packages/Oceananigans/dV6yg/src/Grids/latitude_longitude_grid.jl:653
+  xnodes(::LatitudeLongitudeGrid, ::Any, !Matched::Any; with_halos)
+   @ Oceananigans ~/.julia/packages/Oceananigans/dV6yg/src/Grids/latitude_longitude_grid.jl:637
+  xnodes(::Any, ::Any, !Matched::Any, !Matched::Any; kwargs...)
+   @ Oceananigans ~/.julia/packages/Oceananigans/dV6yg/src/Grids/nodes_and_spacings.jl:78
+  ...
+
+Stacktrace:
+ [1] top-level scope
+   @ /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/etkf_analysis.jl:201
+in expression starting at /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/etkf_analysis.jl:182

@@ -1,7 +1,8 @@
 # Multi-GPU free run (14 days from perturbed IC, no DA)
 #
-# Same as nature run but adds noise and bias to initial conditions.
-# Demonstrates that the problem diverges without DA.
+# Runs from the same subsurface-biased initial conditions as the ensemble mean
+# (depth-dependent bias, zero at surface, max at thermocline ~150m).
+# No DA corrections — serves as baseline for demonstrating DA value.
 #
 # Usage:
 #   srun -n 4 julia --project multi_gpu_da/free_run.jl SPINUP_DIR OUTPUT_DIR
@@ -16,6 +17,7 @@ using Oceananigans.DistributedComputations: construct_global_array
 using CairoMakie
 using Random
 using Oceananigans.OutputReaders: FieldTimeSeries
+using Oceananigans.Grids: znodes
 
 comm = MPI.COMM_WORLD
 rank = MPI.Comm_rank(comm)
@@ -37,26 +39,40 @@ run_days = 14
 start_date = DateTime(2017, 8, 25)
 end_date = start_date + Day(run_days)
 
-# Perturbation parameters (same as single-GPU for consistency)
-T_noise_std = 0.5
-S_noise_std = 0.05
-T_bias = 0.3
-S_bias = 0.02
-noise_depth_levels = 20
+# Perturbation parameters: depth-dependent, subsurface-focused
+# Bias only (no noise) — represents ensemble mean trajectory
+T_bias_max = 1.5   # C, maximum at thermocline (~150m depth)
+S_bias_max = 0.1   # PSU, maximum at thermocline
+z_peak = -150.0    # depth of maximum perturbation (m)
 
 @assert nranks == 4 "Expected 4 MPI ranks, got $nranks"
 arch = Distributed(GPU(); partition=Partition(2, 2))
 
 rank == 0 && @info "Free Run (Multi-GPU): $run_days days at $(resolution) deg"
-rank == 0 && @info "  Perturbation: T noise=$(T_noise_std) C, bias=$(T_bias) C"
+rank == 0 && @info "  Perturbation: T bias_max=$(T_bias_max) C at z=$(z_peak) m (subsurface)"
+
+"""
+Depth-dependent perturbation profile. Maximum at z_peak, zero at surface,
+decaying below. Returns value in [0, 1].
+"""
+function perturbation_profile(z; z_peak=-150.0)
+    z >= 0 && return 0.0
+    d = -z / (-z_peak)
+    return d * exp(1 - d)
+end
 
 # ============================================================================
 #                           GRID AND MODEL
 # ============================================================================
 
 grid = create_grid(arch, resolution)
-# Rank-aware bathymetry (cached from spinup)
 Nx, Ny, Nz = size(grid)
+
+# Compute z-centers for depth-dependent perturbation (before ImmersedBoundaryGrid)
+z_faces = znodes(grid, Face())
+z_centers = [0.5 * (z_faces[k] + z_faces[k+1]) for k in 1:Nz]
+
+# Rank-aware bathymetry (cached from spinup)
 bathy_file = joinpath(spinup_dir, "bathymetry_$(Nx)x$(Ny)_rank$(rank).jld2")
 if isfile(bathy_file)
     bh_data = jldopen(bathy_file)["bottom_height"]
@@ -79,16 +95,15 @@ state = jldopen(state_file) do f
     (T=f["T"], S=f["S"], e=f["e"], u=f["u"], v=f["v"], w=f["w"], η=f["η"])
 end
 
-# Add perturbation to T and S (deterministic per rank)
-Random.seed!(12345 + rank)  # Different but reproducible per rank
+# Add depth-dependent bias to T and S (no noise — represents ensemble mean)
 T_perturbed = copy(state.T)
 S_perturbed = copy(state.S)
 Nz_local = size(T_perturbed, 3)
-k_start = max(1, Nz_local - noise_depth_levels + 1)
 
-for k in k_start:Nz_local
-    T_perturbed[:, :, k] .+= T_noise_std .* randn(Nx, Ny) .+ T_bias
-    S_perturbed[:, :, k] .+= S_noise_std .* randn(Nx, Ny) .+ S_bias
+for k in 1:Nz_local
+    α = perturbation_profile(z_centers[k]; z_peak)
+    T_perturbed[:, :, k] .+= T_bias_max * α
+    S_perturbed[:, :, k] .+= S_bias_max * α
 end
 
 set!(ocean.model, T=T_perturbed, S=S_perturbed, e=state.e, u=state.u, v=state.v)

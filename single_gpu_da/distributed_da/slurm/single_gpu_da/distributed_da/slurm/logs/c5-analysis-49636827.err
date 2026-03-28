@@ -1,0 +1,36 @@
+[ Info: LETKF Analysis (localized)
+[ Info:   Cycle: 5 / 14
+[ Info:   Ensemble size: 10
+[ Info:   Ensemble dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Output dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info:   Diagnostics dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/diagnostics
+[ Info:   Analysis time: day 5.0
+[ Info: Created grid: 400 × 280 × 50 at 0.25° resolution
+[ Info: Loading cached bathymetry from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/spinup/bathymetry_400x280.jld2
+[ Info: Loading 10 member forecasts from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/forecast_05...
+[ Info: Loading nature run 3D tracers...
+[ Info: Loading nature surface observations...
+[ Info: Loading free run surface fields...
+[ Info:   Free run SST RMSE=0.9336 C
+[ Info:   DA forecast SST RMSE=NaN C, spread=NaN C
+[ Info:   Valid obs: 2356 / 4712 (76 profiles)
+[ Info:   LETKF with 1000.0 km localization radius
+ERROR: LoadError: ArgumentError: matrix contains Infs or NaNs
+Stacktrace:
+ [1] chkuplofinite(A::Matrix{Float64}, uplo::Char)
+   @ LinearAlgebra.LAPACK /global/common/software/nersc9/julia/1.11.7/share/julia/stdlib/v1.11/LinearAlgebra/src/lapack.jl:118
+ [2] syevr!(jobz::Char, range::Char, uplo::Char, A::Matrix{Float64}, vl::Float64, vu::Float64, il::Int64, iu::Int64, abstol::Float64)
+   @ LinearAlgebra.LAPACK /global/common/software/nersc9/julia/1.11.7/share/julia/stdlib/v1.11/LinearAlgebra/src/lapack.jl:5380
+ [3] eigen!
+   @ /global/common/software/nersc9/julia/1.11.7/share/julia/stdlib/v1.11/LinearAlgebra/src/symmetriceigen.jl:8 [inlined]
+ [4] #eigen#280
+   @ /global/common/software/nersc9/julia/1.11.7/share/julia/stdlib/v1.11/LinearAlgebra/src/symmetriceigen.jl:13 [inlined]
+ [5] eigen
+   @ /global/common/software/nersc9/julia/1.11.7/share/julia/stdlib/v1.11/LinearAlgebra/src/symmetriceigen.jl:11 [inlined]
+ [6] compute_etkf_weights(Y_b::Matrix{Float64}, y_obs::Vector{Float64}, R_inv_diag::Vector{Float64})
+   @ Main /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/da_utils.jl:77
+ [7] apply_letkf_update!(ensemble_T::Vector{Array{Float64, 3}}, ensemble_S::Vector{Array{Float64, 3}}, Y_b::Matrix{Float64}, y_obs::Vector{Float64}, R_inv::Vector{Float64}, valid_mask::BitVector, i_profiles::Vector{Int64}, j_profiles::Vector{Int64}, k_obs::Vector{Int64}, n_obs_levels::Int64, lon_centers::Matrix{Float64}, lat_centers::Vector{Float64}, lon_profiles::Vector{Float64}, lat_profiles::Vector{Float64}, inflation::Float64, loc_radius_km::Float64)
+   @ Main /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/da_utils.jl:268
+ [8] top-level scope
+   @ /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/etkf_analysis.jl:211
+in expression starting at /global/u1/g/glwagner/DataAssimilocean.jl/single_gpu_da/distributed_da/etkf_analysis.jl:182

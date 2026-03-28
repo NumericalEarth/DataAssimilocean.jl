@@ -1,0 +1,20 @@
+[ Info: Initializing 10 ensemble members
+[ Info:   Spinup dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/spinup
+[ Info:   Output dir: /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da
+[ Info: Created grid: 400 × 280 × 50 at 0.25° resolution
+[ Info: Loading spinup state...
+[ Info: Loading model state from /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/spinup/final_state.jld2
+[ Info:   Source grid size: (400, 280, 50)
+[ Info:   T range: (-1.8797496108267175, 33.444274165530935)
+[ Info:   S range: (0.0, 40.914253898036264)
+[ Info:   Member 1 saved: T range (-1.7066865900249568, 34.73919437869571)
+[ Info:   Member 2 saved: T range (-1.6824286165025086, 34.65533741711137)
+[ Info:   Member 3 saved: T range (-1.6780200122826132, 34.918960123958314)
+[ Info:   Member 4 saved: T range (-1.6985677742797602, 34.70250667986667)
+[ Info:   Member 5 saved: T range (-1.644162667889971, 34.90812838608348)
+[ Info:   Member 6 saved: T range (-1.650098262254112, 34.749933687459105)
+[ Info:   Member 7 saved: T range (-1.834052160025726, 35.08247487689331)
+[ Info:   Member 8 saved: T range (-1.6207595774506713, 34.7807436978179)
+[ Info:   Member 9 saved: T range (-1.7071805109318692, 34.79239817234055)
+[ Info:   Member 10 saved: T range (-1.6922749163359245, 34.60985895078263)
+[ Info: Ensemble initialization complete. 10 members in /pscratch/sd/g/glwagner/DataAssimilocean/single_gpu_da/distributed_da/cycle_00

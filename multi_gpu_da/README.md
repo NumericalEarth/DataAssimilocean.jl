@@ -61,18 +61,28 @@ This is true **weak scaling**: each GPU gets 400×280×50 grid points, identical
 
 ## DA Algorithm Changes from Single-GPU
 
-### Observation Thinning
-- Assimilate every 4th grid point in each horizontal direction
-- Thinned local surface: 100×70 = 7,000 per rank per field
+### Argo-like Observation Network (v2)
+- **3D observations** in the upper 1000m (31 vertical levels, k=20:50)
+- Random profile locations each cycle, mimicking Argo float density:
+  - ~770 floats in domain (~1 per 3-degree box)
+  - Each profiles every ~10 days → **76 profiles per daily cycle**
+  - Each profile: all 31 grid levels in upper 1000m
+- Total obs per cycle (T+S): **~4,700** (vs 56K surface-only in v1)
+- Obs-to-ensemble ratio: **470:1** with 10 members, **47:1** with 100 members
+- Land profiles filtered using nature run surface T mask
+
+### Previous: Surface Thinning (v1)
+- Assimilate every 4th grid point in each horizontal direction (surface only)
 - Total thinned obs (T+S): ~56,000
-- Ratio to ensemble size: 5,600:1 (vs 11,200:1 in single-GPU)
+- Ratio to ensemble size: 5,600:1
 
 ### Stronger Inflation
 - Multiplicative inflation: 1.5 (vs 1.05 in single-GPU)
 
 ### MPI-Aware ETKF
 - Each rank stores its local ensemble states in CPU memory
-- Surface observations gathered via MPI.Allgather (thinned)
+- Profile observations extracted locally, combined via MPI.Allreduce(SUM)
+- Single Allreduce for the full ensemble-observation matrix (efficient for 100 members)
 - ETKF weights computed independently on all ranks (deterministic)
 - Weight application is local (no MPI needed)
 
@@ -173,7 +183,7 @@ and bring total wall time much closer to ideal weak scaling.
 
 ### Analysis
 
-**RMSE improvement**: SST RMSE decreased steadily from 0.355 to 0.241 C over 14 cycles (32% reduction). This is mostly due to the ensemble members converging toward the truth through the forecast model dynamics, since the analysis corrections are tiny.
+**RMSE improvement**: SST RMSE decreased steadily from 0.355 to 0.241 C over 14 cycles (32% reduction). This is mostly due to the initial perturbations (0.3 C bias + 0.5 C noise) decaying under the shared atmospheric forcing (JRA55), not from DA corrections — a free run from the same perturbed ICs would show similar RMSE decrease. The analysis corrections are negligible (forecast RMSE ≈ analysis RMSE) because the ensemble spread collapsed.
 
 **Ensemble collapse persists**: T spread drops from 0.135 to 0.008 C despite 1.5 multiplicative inflation. The analysis update is negligible (forecast RMSE ≈ analysis RMSE). With 56K thinned obs and 10 members, the problem is still severely rank-deficient. However, the spread stabilizes rather than going to zero, and even shows slight recovery in later cycles.
 
@@ -181,8 +191,8 @@ and bring total wall time much closer to ideal weak scaling.
 
 ### Improvements for Next Iteration
 
-1. **Additive inflation** or localization to prevent collapse
-2. **Fewer observations**: Thin more aggressively (every 10-20 points)
-3. **Larger ensemble**: 50+ members if memory permits
+1. **Localization** (e.g., via [Manteia.jl](https://github.com/aeolus-earth/Manteia.jl)) to prevent collapse
+2. ~~**Fewer observations**: Thin more aggressively~~ → Done: Argo-like network with ~4,700 obs/cycle
+3. **Larger ensemble**: Scale to 100 members (memory: ~27 GB CPU/rank for 100 members, feasible on Perlmutter)
 4. **Combined Julia process**: Load code once, run all steps to eliminate ~40 min of precompilation overhead
 5. **Variational method**: The differentiable workflow (4D-Var) would avoid ensemble collapse entirely
